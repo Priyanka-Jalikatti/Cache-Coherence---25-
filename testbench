@@ -1,0 +1,94 @@
+`timescale 1ns/1ps
+
+module tb_top;
+
+    logic clk;
+    logic reset;
+
+    // Instantiate the TopLevel design
+    TopLevel #(
+        .CACHE_SIZE(8),
+        .BLOCK_SIZE(4),
+        .ADDRESS_WIDTH(6),
+        .DATA_WIDTH(32),
+        .NUM_CORES(2)
+    ) dut (
+        .clk(clk),
+        .reset(reset)
+    );
+
+    // Clock generation: 10ns period
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk;
+    end
+
+    // Reset and test sequence
+    initial begin
+        reset = 1;
+        #10;
+        reset = 0;
+
+        // Scenario:
+        // Core 0 writes to address 0x00
+        // Core 1 reads from address 0x00
+        // Core 0 reads from address 0x04
+        // Core 1 writes to address 0x04
+        // Core 0 reads from address 0x00
+
+        // Core 0 Write to 0x00
+        #20;
+        dut.core_req_valid[0] = 1;
+        dut.core_req_type[0] = 1; // Write
+        dut.core_req_addr[0] = 6'b000000;
+        dut.core_req_data[0] = 32'h12345678;
+        #10;
+        dut.core_req_valid[0] = 0;
+
+        // Core 1 Read from 0x00
+        #10;
+        dut.core_req_valid[1] = 1;
+        dut.core_req_type[1] = 0; // Read
+        dut.core_req_addr[1] = 6'b000000;
+        dut.core_req_data[1] = 32'h00000000;
+        #10;
+        dut.core_req_valid[1] = 0;
+
+        // Core 0 Read from 0x04
+        #20;
+        dut.core_req_valid[0] = 1;
+        dut.core_req_type[0] = 0; // Read
+        dut.core_req_addr[0] = 6'b000100;
+        dut.core_req_data[0] = 32'h00000000;
+        #10;
+        dut.core_req_valid[0] = 0;
+
+        // Core 1 Write to 0x04
+        #10;
+        dut.core_req_valid[1] = 1;
+        dut.core_req_type[1] = 1; // Write
+        dut.core_req_addr[1] = 6'b000100;
+        dut.core_req_data[1] = 32'h87654321;
+        #10;
+        dut.core_req_valid[1] = 0;
+
+        // Core 0 Read from 0x00 again
+        #20;
+        dut.core_req_valid[0] = 1;
+        dut.core_req_type[0] = 0; // Read
+        dut.core_req_addr[0] = 6'b000000;
+        dut.core_req_data[0] = 32'h00000000;
+        #10;
+        dut.core_req_valid[0] = 0;
+
+        #100;
+        $finish;
+    end
+
+    // Dump waveform for GTKWave
+    initial begin
+        $dumpfile("wave.vcd");
+        $dumpvars(0, tb_top);
+    end
+
+endmodule

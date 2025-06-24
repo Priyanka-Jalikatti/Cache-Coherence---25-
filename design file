@@ -1,0 +1,137 @@
+`include "cache.sv"
+`include "bus.sv"
+`include "memory.sv"
+`include "core.sv"
+
+module TopLevel #(
+    parameter CACHE_SIZE     = 8,
+    parameter BLOCK_SIZE     = 4,
+    parameter ADDRESS_WIDTH  = 6,
+    parameter DATA_WIDTH     = 32,
+    parameter INDEX_WIDTH    = 3,
+    parameter TAG_WIDTH      = ADDRESS_WIDTH - INDEX_WIDTH - $clog2(BLOCK_SIZE),
+    parameter NUM_CORES      = 2
+) (
+    input logic clk,
+    input logic reset,
+
+    // Expose core interface signals so testbench can drive them directly
+    output logic [NUM_CORES-1:0] core_req_valid,
+    output logic [NUM_CORES-1:0] core_req_type,
+    output logic [ADDRESS_WIDTH-1:0] core_req_addr [NUM_CORES],
+    output logic [DATA_WIDTH-1:0] core_req_data [NUM_CORES],
+    input  logic [NUM_CORES-1:0] cache_resp_valid,
+    input  logic [DATA_WIDTH-1:0] cache_resp_data [NUM_CORES]
+);
+
+    // Cache <-> Bus
+    logic [NUM_CORES-1:0] bus_req_valid;
+    logic [NUM_CORES-1:0] bus_req_type;
+    logic [ADDRESS_WIDTH-1:0] bus_req_addr [NUM_CORES];
+    logic [DATA_WIDTH-1:0] bus_data_out [NUM_CORES];
+
+    // Bus <-> Cache
+    logic [NUM_CORES-1:0] bus_snoop_valid;
+    logic [NUM_CORES-1:0] bus_snoop_type;
+    logic [ADDRESS_WIDTH-1:0] bus_snoop_addr [NUM_CORES];
+    logic [DATA_WIDTH-1:0] bus_data_in [NUM_CORES];
+    logic [NUM_CORES-1:0] bus_data_in_valid_to_cache;
+
+    logic [NUM_CORES-1:0] snoop_resp_valid;
+    logic [DATA_WIDTH-1:0] snoop_resp_data [NUM_CORES];
+    logic [NUM_CORES-1:0] snoop_resp_hit;
+    logic [NUM_CORES*2-1:0] snoop_resp_state; // Fixed width: 2 bits/core
+
+    // Bus <-> Memory
+    logic mem_req_valid;
+    logic mem_req_write;
+    logic [ADDRESS_WIDTH-1:0] mem_req_addr;
+    logic [DATA_WIDTH-1:0] mem_req_data;
+    logic mem_resp_valid;
+    logic [DATA_WIDTH-1:0] mem_resp_data;
+
+    // ✅ Remove Core instantiation — testbench will drive inputs
+
+    // ✅ Instantiate Caches
+    genvar i;
+    generate
+        for (i = 0; i < NUM_CORES; i++) begin : gen_cache
+            Cache #(
+                .CACHE_SIZE(CACHE_SIZE),
+                .BLOCK_SIZE(BLOCK_SIZE),
+                .ADDRESS_WIDTH(ADDRESS_WIDTH),
+                .DATA_WIDTH(DATA_WIDTH),
+                .INDEX_WIDTH(INDEX_WIDTH),
+                .TAG_WIDTH(TAG_WIDTH)
+            ) cache_inst (
+                .clk(clk),
+                .reset(reset),
+                .core_req_valid(core_req_valid[i]),
+                .core_req_type(core_req_type[i]),
+                .core_req_addr(core_req_addr[i]),
+                .core_req_data(core_req_data[i]),
+                .bus_snoop_valid(bus_snoop_valid[i]),
+                .bus_snoop_type(bus_snoop_type[i]),
+                .bus_snoop_addr(bus_snoop_addr[i]),
+                .bus_data_in(bus_data_in[i]),
+                .bus_data_in_valid_from_bus(bus_data_in_valid_to_cache[i]),
+                .core_resp_valid(cache_resp_valid[i]),
+                .core_resp_data(cache_resp_data[i]),
+                .bus_req_valid(bus_req_valid[i]),
+                .bus_req_type(bus_req_type[i]),
+                .bus_req_addr(bus_req_addr[i]),
+                .bus_data_out(bus_data_out[i]),
+                .snoop_resp_valid(snoop_resp_valid[i]),
+                .snoop_resp_data(snoop_resp_data[i]),
+                .snoop_resp_hit(snoop_resp_hit[i]),
+                .snoop_resp_state(snoop_resp_state[i*2 +: 2]) // ✅ 2 bits/core
+            );
+        end
+    endgenerate
+
+    // ✅ Instantiate Bus
+    Bus #(
+        .ADDRESS_WIDTH(ADDRESS_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH),
+        .NUM_CORES(NUM_CORES)
+    ) bus_inst (
+        .clk(clk),
+        .reset(reset),
+        .cache_req_valid(bus_req_valid),
+        .cache_req_type(bus_req_type),
+        .cache_req_addr(bus_req_addr),
+        .cache_data_out(bus_data_out),
+        .mem_resp_valid(mem_resp_valid),
+        .mem_resp_data(mem_resp_data),
+        .cache_snoop_valid(bus_snoop_valid),
+        .cache_snoop_type(bus_snoop_type),
+        .cache_snoop_addr(bus_snoop_addr),
+        .bus_data_in_to_cache(bus_data_in),
+        .bus_data_in_valid_to_cache(bus_data_in_valid_to_cache),
+        .snoop_resp_valid_from_cache(snoop_resp_valid),
+        .snoop_resp_data_from_cache(snoop_resp_data),
+        .snoop_resp_hit_from_cache(snoop_resp_hit),
+        .snoop_resp_state_from_cache(snoop_resp_state),
+        .mem_req_valid(mem_req_valid),
+        .mem_req_write(mem_req_write),
+        .mem_req_addr(mem_req_addr),
+        .mem_req_data(mem_req_data)
+    );
+
+    // ✅ Instantiate Memory
+    Memory #(
+        .ADDRESS_WIDTH(ADDRESS_WIDTH),
+        .DATA_WIDTH(DATA_WIDTH),
+        .MEMORY_SIZE(1 << ADDRESS_WIDTH)
+    ) memory_inst (
+        .clk(clk),
+        .reset(reset),
+        .mem_req_valid(mem_req_valid),
+        .mem_req_addr(mem_req_addr),
+        .mem_req_write(mem_req_write),
+        .mem_req_data(mem_req_data),
+        .mem_resp_valid(mem_resp_valid),
+        .mem_resp_data(mem_resp_data)
+    );
+
+endmodule
